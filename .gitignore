@@ -1,0 +1,12 @@
+# 依赖（本项目零依赖，出现即异常）
+node_modules/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 日志
+*.log
+npm-debug.log*

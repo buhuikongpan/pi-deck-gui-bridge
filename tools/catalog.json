@@ -1,0 +1,643 @@
+{
+	"schemaVersion": 1,
+	"piVersion": "0.87.1",
+	"counts": {
+		"uiPoints": 29,
+		"uiPointsBridged": 10,
+		"events": 36,
+		"guiPoints": 14,
+		"total": 79
+	},
+	"uiPoints": [
+		{
+			"key": "select",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "select(title: string, options: string[], opts?: ExtensionUIDialogOptions): Promise<string | undefined>",
+			"bridgeStatus": "passthrough",
+			"note": "PiDeck 已有时间线卡片，桥不动"
+		},
+		{
+			"key": "confirm",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "confirm(title: string, message: string, opts?: ExtensionUIDialogOptions): Promise<boolean>",
+			"bridgeStatus": "passthrough",
+			"note": "PiDeck 已有确认卡片，桥不动"
+		},
+		{
+			"key": "input",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "input(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions): Promise<string | undefined>",
+			"bridgeStatus": "passthrough",
+			"note": "PiDeck 已有输入卡片，桥不动"
+		},
+		{
+			"key": "notify",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "notify(message: string, type?: \"info\" | \"warning\" | \"error\"): void",
+			"bridgeStatus": "passthrough",
+			"note": "PiDeck 已有 toast（主进程已清洗 ANSI）"
+		},
+		{
+			"key": "onTerminalInput",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "onTerminalInput(handler: TerminalInputHandler): () => void",
+			"bridgeStatus": "not-bridged",
+			"note": "GUI 里没有终端"
+		},
+		{
+			"key": "setStatus",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setStatus(key: string, text: string | undefined): void",
+			"bridgeStatus": "wired",
+			"note": "全量接管为状态栏条目（多 key 共存）；同时仍转发原实现，保住 pideck:auto-title"
+		},
+		{
+			"key": "setWorkingMessage",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setWorkingMessage(message?: string): void",
+			"bridgeStatus": "wired",
+			"note": "流式状态行文案"
+		},
+		{
+			"key": "setWorkingVisible",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setWorkingVisible(visible: boolean): void",
+			"bridgeStatus": "wired",
+			"note": "流式状态行显隐"
+		},
+		{
+			"key": "setWorkingIndicator",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setWorkingIndicator(options?: WorkingIndicatorOptions): void",
+			"bridgeStatus": "wired",
+			"note": "取 frames 映射成 GUI 指示器"
+		},
+		{
+			"key": "setHiddenThinkingLabel",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setHiddenThinkingLabel(label?: string): void",
+			"bridgeStatus": "wired",
+			"note": "替换折叠思考块标签"
+		},
+		{
+			"key": "setWidget",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setWidget(key: string, content: string[] | undefined, options?: ExtensionWidgetOptions): void",
+			"bridgeStatus": "wired",
+			"note": "字符串形式保持原路；组件形式被桥接（RPC 下原本被直接丢弃）",
+			"overload": {
+				"index": 1,
+				"total": 2
+			}
+		},
+		{
+			"key": "setWidget",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setWidget(key: string, content: ((tui: TUI, theme: Theme) => Component & { dispose?(): void",
+			"bridgeStatus": "wired",
+			"note": "字符串形式保持原路；组件形式被桥接（RPC 下原本被直接丢弃）",
+			"overload": {
+				"index": 2,
+				"total": 2
+			}
+		},
+		{
+			"key": "setFooter",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setFooter(factory: ((tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => Component & { dispose?(): void",
+			"bridgeStatus": "wired",
+			"note": "调 factory 求值后翻译成 UINode"
+		},
+		{
+			"key": "setHeader",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setHeader(factory: ((tui: TUI, theme: Theme) => Component & { dispose?(): void",
+			"bridgeStatus": "wired",
+			"note": "同上"
+		},
+		{
+			"key": "setTitle",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setTitle(title: string): void",
+			"bridgeStatus": "wired",
+			"note": "落到 document.title"
+		},
+		{
+			"key": "custom",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "custom<T>(factory: (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: T) => void) => (Component & { dispose?(): void",
+			"bridgeStatus": "not-bridged",
+			"note": "画的是字符行，观感是终端风。GUI 对应物是 ctx.gui.custom()"
+		},
+		{
+			"key": "pasteToEditor",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "pasteToEditor(text: string): void",
+			"bridgeStatus": "passthrough",
+			"note": "走 setEditorText 原路"
+		},
+		{
+			"key": "setEditorText",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setEditorText(text: string): void",
+			"bridgeStatus": "passthrough",
+			"note": "已有落点（含既有去重键，桥不碰）"
+		},
+		{
+			"key": "getEditorText",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "getEditorText(): string",
+			"bridgeStatus": "passthrough",
+			"note": "同步读，RPC 下 pi 返回空串，桥不接管"
+		},
+		{
+			"key": "editor",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "editor(title: string, prefill?: string): Promise<string | undefined>",
+			"bridgeStatus": "passthrough",
+			"note": "PiDeck 已有多行编辑器弹框"
+		},
+		{
+			"key": "addAutocompleteProvider",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "addAutocompleteProvider(factory: AutocompleteProviderFactory): void",
+			"bridgeStatus": "not-bridged",
+			"note": "GUI 输入框有自己的补全机制"
+		},
+		{
+			"key": "setEditorComponent",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setEditorComponent(factory: EditorFactory | undefined): void",
+			"bridgeStatus": "not-bridged",
+			"note": "拦截但不替换输入框：草稿状态在 PiDeck 的 atoms 里、不在 pi 进程；靠桥回灌每次按键要走 ~100ms 轮询；替换后发送/附件/斜杠命令全部失联"
+		},
+		{
+			"key": "getEditorComponent",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "getEditorComponent(): EditorFactory | undefined",
+			"bridgeStatus": "passthrough",
+			"note": "RPC 下 pi 恒返回 undefined（自定义输入框本就不支持），桥保持该语义"
+		},
+		{
+			"key": "getAllThemes",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "getAllThemes(): { name: string",
+			"bridgeStatus": "passthrough",
+			"note": "RPC 下 pi 返回空数组"
+		},
+		{
+			"key": "getTheme",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "getTheme(name: string): Theme | undefined",
+			"bridgeStatus": "passthrough",
+			"note": "RPC 下 pi 返回 undefined"
+		},
+		{
+			"key": "setTheme",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setTheme(theme: string | Theme): { success: boolean",
+			"bridgeStatus": "passthrough",
+			"note": "RPC 下 pi 返回失败"
+		},
+		{
+			"key": "getToolsExpanded",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "getToolsExpanded(): boolean",
+			"bridgeStatus": "passthrough",
+			"note": "已有落点"
+		},
+		{
+			"key": "setToolsExpanded",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "setToolsExpanded(expanded: boolean): void",
+			"bridgeStatus": "passthrough",
+			"note": "已有落点"
+		},
+		{
+			"key": "theme",
+			"group": "pi-ui",
+			"kind": "method",
+			"signature": "readonly theme: Theme",
+			"bridgeStatus": "passthrough",
+			"note": "桥另供一份哨兵 theme 给扩展用"
+		}
+	],
+	"events": [
+		{
+			"key": "after_provider_response",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "agent_before_settle",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "agent_end",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "agent_settled",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "agent_start",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "before_agent_start",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "before_provider_headers",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "before_provider_request",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "context",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "context_with_system",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "input",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "message_end",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "message_start",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "message_update",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "model_select",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "project_trust",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "resources_discover",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_before_compact",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_before_fork",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_before_switch",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_before_tree",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_compact",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_compact_failed",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_info_changed",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_shutdown",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_start",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "session_tree",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "thinking_level_select",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "tool_execution_end",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "tool_execution_start",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "tool_execution_update",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "turn_end",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "turn_start",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "ui_prompt_end",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "ui_prompt_start",
+			"group": "pi-event",
+			"kind": "event"
+		},
+		{
+			"key": "user_bash",
+			"group": "pi-event",
+			"kind": "event"
+		}
+	],
+	"guiPoints": [
+		{
+			"key": "sidebar.panel",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setSidebarPanel",
+			"keyMeaning": "贡献标识，可多 key 共存",
+			"host": "src/renderer/src/components/sidebar/SidebarContent.tsx",
+			"where": "conversation-list 内 ProjectTree 之后",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setSidebarPanel(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "sidebar.section",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setSidebarSection",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/sidebar/SidebarContent.tsx",
+			"where": "同上",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setSidebarSection(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "content.view",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setContentView",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/workspace/WorkbenchStage.tsx",
+			"where": "workbench-content-frame 内",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setContentView(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "composer.toolbar",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setComposerToolbar",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/session/ComposerArea.tsx",
+			"where": "底栏之后、输入卡之内",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setComposerToolbar(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "titlebar.action",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setTitlebarAction",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/AppHeader.tsx",
+			"where": "与 window-controls 同级（显式 no-drag）",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setTitlebarAction(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "banner",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setBanner",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/session/SessionView.tsx",
+			"where": "标题栏之下、SessionBranchBar 之前",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setBanner(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "tool.extra",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setToolExtra",
+			"keyMeaning": "**toolName**（只在该工具的工具卡内显示）",
+			"host": "src/renderer/src/components/session/ToolCallComponents.tsx",
+			"where": "ToolCard 默认内容之下",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setToolExtra(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "message.extra",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setMessageExtra",
+			"keyMeaning": "**role**（TurnRow 按 assistant 匹配）",
+			"host": "src/renderer/src/components/session/turn/TurnRow.tsx",
+			"where": "助手回合 </article> 之前",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setMessageExtra(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "thinking.extra",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setThinkingExtra",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/session/TimelineEventCards.tsx",
+			"where": "ThinkingBlock 展开区内",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setThinkingExtra(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "dialog.action",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setDialogAction",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/ui-shadcn/ConfirmDialog.tsx",
+			"where": "AlertDialogFooter 内、既有按钮之前",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setDialogAction(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "dialog.body",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setDialogBody",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/ui-shadcn/ConfirmDialog.tsx",
+			"where": "AlertDialogHeader 之后",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setDialogBody(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "settings.section",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setSettingsSection",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/app/SettingsModal.tsx",
+			"where": "全部设置 tab 之下",
+			"order": true,
+			"coverageGaps": [],
+			"example": "ctx.gui.setSettingsSection(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "session.item",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setSessionItemExtra",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/sidebar/SessionTree.tsx",
+			"where": "历史会话行之后",
+			"order": true,
+			"coverageGaps": [
+				"ActiveSessionsTree",
+				"RecentSessionsSection",
+				"SessionTabsBar"
+			],
+			"example": "ctx.gui.setSessionItemExtra(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		},
+		{
+			"key": "context.menu",
+			"group": "pideck-gui",
+			"kind": "keyed",
+			"method": "ctx.gui.setContextMenuItem",
+			"keyMeaning": "贡献标识",
+			"host": "src/renderer/src/components/sidebar/SidebarComponents.tsx",
+			"where": "MenuShell（侧边栏右键菜单共享壳）内、原有条目之后",
+			"order": true,
+			"coverageGaps": [
+				"非 MenuShell 的右键菜单"
+			],
+			"example": "ctx.gui.setContextMenuItem(\"my-ext\", (gui, theme) => ({ kind: \"text\", id: \"t\", text: \"hello\", tone: \"accent\" }), { order: 100 });"
+		}
+	],
+	"guiServices": [
+		{
+			"key": "custom",
+			"method": "ctx.gui.custom",
+			"summary": "GUI 作画工厂：四参数与 ctx.ui.custom 同形，画笔换成 GUI 控件"
+		},
+		{
+			"key": "toast",
+			"method": "ctx.gui.toast",
+			"summary": "带动作按钮的 toast（比 notify 强）"
+		},
+		{
+			"key": "confirm",
+			"method": "ctx.gui.confirm",
+			"summary": "富内容确认框（可塞自定义 body 节点）"
+		},
+		{
+			"key": "overlay",
+			"method": "ctx.gui.overlay",
+			"summary": "开一个独立覆盖层，返回 handle"
+		},
+		{
+			"key": "command",
+			"method": "ctx.gui.command",
+			"summary": "注册命令面板命令"
+		},
+		{
+			"key": "icon",
+			"method": "ctx.gui.icon",
+			"summary": "注册图标（内置名或 SVG path）"
+		}
+	]
+}
