@@ -117,6 +117,32 @@
 
 > 事件在 PiDeck 里**照常工作** —— 桥不碰事件通道，只碰 UI 扩展点。
 
+### 2.1 拿 gui 的正确姿势：不依赖加载顺序（「桥最先可用」）
+
+pi 的扩展加载顺序（项目 → 全局 `~/.pi/agent/extensions` → `-e` 显式）不可更改，
+桥（经 PiDeck 以 `-e` 注入）排在全局用户扩展**之后**。为让 gui 能力不依赖
+加载顺序，桥把 `GuiNamespace` 同时挂在两处（**同一个对象**，`ctx.gui === ctx.ui.gui`）：
+
+| 取法 | 可用时机 | 适用 |
+|---|---|---|
+| **`ctx.ui.gui`（推荐）** | 桥的 `session_start` 挂载后的**任何事件** / 命令 handler | 任何扩展，无论加载顺序 |
+| `ctx.gui` | 同上（桥挂载后），但仅限当次 emit 的 ctx | 向后兼容 |
+
+```ts
+export default function (pi: ExtensionAPI) {
+	// 推荐：从共享 ui 单例取，任何时候都可靠
+	pi.on("agent_start", async (_e, ctx) => {
+		ctx.ui.gui?.setSettingsSection("my-ext", myFactory, { title: "我的扩展", order: 900 });
+	});
+	// 若必须在 session_start 同步段初始化：先于桥注册时 ctx.ui.gui 可能还没挂上，
+	// 此时 ctx.gui 也是 undefined —— 请改到 agent_start，或下一拍重试一次（勿用长 timer 轮询）。
+}
+```
+
+> 桥还在 `project_trust`（早于一切 `session_start`）里预热 runtime 并对 trust ui
+> 尽力挂 `gui`；但 pi 在信任期给的是临时 ui 对象，真正的单例要到 session 才存在。
+> 纯终端（`PIDECK_BRIDGE_URL` 未设）时 `ctx.ui.gui` 为 `undefined`，取用前判空。
+
 ---
 
 ## 3. `ctx.gui.*` —— PiDeck 专属落点（14 个）

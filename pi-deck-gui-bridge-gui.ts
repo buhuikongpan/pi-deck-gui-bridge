@@ -462,7 +462,18 @@ export function createGuiNamespace(runtime: BridgeRuntime): GuiNamespace {
 	return namespace;
 }
 
-// ── 注入：在 ctx 上挂 gui getter（§7.5）─────────────────────────
+// ── 注入：在 ctx / ui 单例上挂 gui getter（§7.5 + 桥「最先可用」§四.A）─
+
+/** namespace 按 runtime 记忆化：`ctx.gui` 与 `ui.gui` 是同一个对象（恒等一致）。 */
+const namespaceByRuntime = new WeakMap<BridgeRuntime, GuiNamespace>();
+function getGuiNamespace(runtime: BridgeRuntime): GuiNamespace {
+	let namespace = namespaceByRuntime.get(runtime);
+	if (!namespace) {
+		namespace = createGuiNamespace(runtime);
+		namespaceByRuntime.set(runtime, namespace);
+	}
+	return namespace;
+}
 
 /**
  * 在 `ctx` 上挂 `gui` getter。
@@ -472,7 +483,7 @@ export function createGuiNamespace(runtime: BridgeRuntime): GuiNamespace {
  */
 export function installGuiNamespace(ctx: ExtensionContext, runtime: BridgeRuntime): void {
 	try {
-		const namespace = createGuiNamespace(runtime);
+		const namespace = getGuiNamespace(runtime);
 		const state = guiState(runtime);
 		state.ctx = ctx;
 		// 模块级降级路径也要能拿到 runtime
@@ -494,6 +505,43 @@ export function installGuiNamespace(ctx: ExtensionContext, runtime: BridgeRuntim
 		}
 	} catch (error) {
 		log(`installGuiNamespace 抛错（已吞）: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+/**
+ * 把 `gui` getter 挂上 **`ctx.ui` 共享单例**（桥「最先可用」主方案，PROMPT §四.A）。
+ *
+ * 为什么挂 ui：`ctx` 每次 emit 都是新对象，但 `ctx.ui` 是**共享单例的活 getter**
+ * （pi runner.js `get ui() { return runner.uiContext }`，与 `wrapUI` 同机制、同可靠性）。
+ * 挂在这里之后，**任何加载顺序**的扩展都能从 `ctx.ui.gui` 拿到 gui：
+ * 先于桥注册的扩展在自己的 session_start 同步段取不到（那时桥还没跑），
+ * 但从**后续任何事件**（`agent_start` / `tool_call` / 命令 handler / 用户交互）
+ * 起必然可用，无需 timer 重试。
+ *
+ * 幂等：`hasOwnProperty("gui")` 为真（已挂过，或 pi 原生未来提供了该字段）则跳过。
+ * **不触碰** `state.ctx`——本函数拿不到 `ExtensionContext`，别污染渲染上下文；
+ * `state.ctx` 仍由 `installGuiNamespace`（真 ctx 到场时）负责。
+ *
+ * @returns 是否由本次调用完成挂载（false = 已存在 / 不可挂 / 抛错已吞）。
+ */
+export function installGuiOnUiSingleton(ui: unknown, runtime: BridgeRuntime): boolean {
+	try {
+		if (!ui || typeof ui !== "object") return false;
+		const target = ui as Record<string, unknown>;
+		if (Object.prototype.hasOwnProperty.call(target, "gui")) return false; // 幂等 / 不抢原生字段
+		const namespace = getGuiNamespace(runtime);
+		// 模块级降级路径（guiSet 等）也一并提前可用
+		setCurrentGuiRuntime(runtime, detectOwner());
+		Object.defineProperty(target, "gui", {
+			get: () => namespace,
+			enumerable: false,
+			configurable: true,
+		});
+		log("ui.gui 已挂上共享单例（任何加载顺序的扩展从 ctx.ui.gui 取用）");
+		return true;
+	} catch (error) {
+		log(`installGuiOnUiSingleton 抛错（已吞）: ${error instanceof Error ? error.message : String(error)}`);
+		return false;
 	}
 }
 

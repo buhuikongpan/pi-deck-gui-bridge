@@ -1,6 +1,6 @@
 {
 	"name": "pi-deck-gui-bridge",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "把 pi 在 RPC 模式下被丢弃的声明式 UI 扩展点接回 PiDeck，并另供一套写法同形的 GUI 专属扩展点与作画工厂。",
 	"license": "MIT",
 	"author": "buhuikongpan",
@@ -12,8 +12,18 @@
 	"bugs": {
 		"url": "https://github.com/buhuikongpan/pi-deck-gui-bridge/issues"
 	},
-	"keywords": ["pi", "pi-coding-agent", "pideck", "extension", "ui", "bridge", "rpc"],
+	"keywords": [
+		"pi",
+		"pi-coding-agent",
+		"pideck",
+		"extension",
+		"ui",
+		"bridge",
+		"rpc"
+	],
 	"pi": {
-		"extensions": ["./pi-deck-gui-bridge.ts"]
+		"extensions": [
+			"./pi-deck-gui-bridge.ts"
+		]
 	}
 }
