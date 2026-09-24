@@ -616,6 +616,25 @@ export function guiIcon(name: string, svgPath: string): void {
 
 // ── 卸载清理（§7.7 要求 3）──────────────────────────────────────
 
+/**
+ * 全量重推 `ctx.gui` 的全部落点与覆盖层（PiDeck 要快照时调用，§9.4）。
+ *
+ * 为什么需要它：`runtime.ts` 的 `resync()` 只遍历 `state.tracked`
+ * （被 `wrapUI` 接管的 `ctx.ui.*` 声明式落点），而 `ctx.gui.*` 的贡献存在**本模块**的
+ * `contributions` / `overlays` 里，那边看不到。不补这一趟，`setSettingsSection` 这类
+ * 贡献在 PiDeck 渲染层清空状态后就永远回不来（一次性推送 + 无重推 = 卡片永久消失）。
+ */
+export function repushGuiState(runtime: BridgeRuntime): void {
+	const state = guiState(runtime);
+	for (const contribution of state.contributions.values()) {
+		// force = true：跳过 lastHash 去重，哪怕内容没变也要重发
+		pushContribution(contribution, runtime, true);
+	}
+	for (const [elementId, overlay] of state.overlays) {
+		runtime.transport.push({ type: "overlay", elementId, node: overlay.node, options: overlay.options });
+	}
+}
+
 /** 清掉某扩展名下的全部 GUI 贡献（扩展禁用/卸载时调用）。 */
 export function clearGuiContributions(runtime: BridgeRuntime, owner: string): void {
 	const state = guiState(runtime);

@@ -155,4 +155,12 @@ export type UIBridgeSnapshot = {
 /** 一次 HTTP 往返的响应体：PiDeck 把待处理事件带回给桥。 */
 export type UIBridgeResponse = {
 	events?: UIBridgeEvent[];
+	/**
+	 * PiDeck 要求桥**全量重推一次**（§9.4）。
+	 *
+	 * 用于渲染层丢失了桥状态（换 agent 绑定、会话切换、设置弹窗重开、应用重启）
+	 * 的场景：桥的落点是「一次性推送」，丢了不会自己回来，只能靠 PiDeck 主动要一次快照。
+	 * 搭在既有的轮询响应上，不新开路由 —— 纯终端/老 PiDeck 不认这个字段，桥行为不变。
+	 */
+	resync?: boolean;
 };

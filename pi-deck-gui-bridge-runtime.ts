@@ -19,6 +19,7 @@
 
 import type { UIBridgeUpdate } from "./pi-deck-gui-bridge-types";
 import type { UIBridgeTransport } from "./pi-deck-gui-bridge-transport";
+import { repushGuiState } from "./pi-deck-gui-bridge-gui";
 import { hashUINode, serialize, componentOf, invokeAction } from "./pi-deck-gui-bridge-serialize";
 import { createBridgeTheme, type BridgeTheme } from "./pi-deck-gui-bridge-theme";
 import { loadPiTui, type PiTuiComponent, type PiTuiModule } from "./pi-deck-gui-bridge-tui";
@@ -465,7 +466,7 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 		}
 	}
 
-	/** 全量重推（PiDeck 重连时用）。 */
+	/** 全量重推（PiDeck 要快照时用，§9.4）。 */
 	function resync(): void {
 		transport.push({ type: "resync" });
 		for (const [key, text] of state.status) transport.push({ type: "status", key, text });
@@ -475,6 +476,9 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 		if (state.title !== undefined) transport.push({ type: "title", title: state.title });
 		if (state.hiddenThinkingLabel !== undefined) transport.push({ type: "thinking-label", label: state.hiddenThinkingLabel });
 		for (const targetId of state.tracked.keys()) pushTarget(targetId, true);
+		// ctx.gui 的贡献（setStatus 之外的 setSettingsSection 等）存在 gui.ts 的 state 里，
+		// 不在上面这张 tracked 表里 —— 不补这一趟，PiDeck 清空状态后它们永远回不来。
+		repushGuiState(runtime);
 	}
 
 	/** 处理 PiDeck 回灌的交互事件（§8.3）。 */
@@ -495,8 +499,13 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 	}
 
 	transport.onEvent(handleEvent);
+	// PiDeck 在轮询响应体里回 `resync: true` → 全量重推一次（§9.4）。
+	// 落点是一次性推送：渲染层丢过状态（换 agent 绑定/会话切换/设置弹窗重开/应用重启）
+	// 就不会自己回来，必须由 PiDeck 主动要一次快照。
+	// 可选链：自定义/旧版 transport 没实现 onResync 时静默跳过，不炸会话（§14.5）。
+	transport.onResync?.(resync);
 
-	return {
+	const runtime: BridgeRuntime = {
 		state,
 		transport,
 		theme,
@@ -507,6 +516,7 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 		resync,
 		isWrapped: () => wrapped,
 	};
+	return runtime;
 }
 
 /** 每个 pi 进程一份桥运行时（稳定单例，§14.9）。 */

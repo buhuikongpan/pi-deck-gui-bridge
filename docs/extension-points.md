@@ -302,6 +302,31 @@ GUI 上的一次点击 → PiDeck 回传事件 → 桥在 pi 进程内调**公�
 **限制**：回灌只承诺 `select` / `navigate` / `input` / `key` / `filter` / `action` 六类。
 部分组件的交互无法用公开方法驱动（如 `Editor` 的光标）→ 该组件降级为只读展示。
 
+### 6.1 重同步：PiDeck 主动要快照
+
+桥的落点是**一次性推送** —— 推过了就不再推。所以只要 PiDeck 渲染层丢一次状态
+（换 agent 绑定、聚焦会话切换、设置弹窗重开、应用重启），贡献就**永远不回来**。
+
+协议上搭在既有轮询响应体里，**不新开路由**：
+
+```ts
+type UIBridgeResponse = {
+  events?: UIBridgeEvent[];
+  resync?: boolean;   // PiDeck 要求桥全量重推一次
+};
+```
+
+- 响应体里 `resync: true` → 桥立刻全量重推（status / working / title / 全部落点 +
+  `ctx.gui` 全部贡献与覆盖层），发生在事件回灌**之后**、下一轮轮询**之前**
+- **绕过去重**（`force = true`）：内容没变也要重发 —— 这是关键，
+  靠 `lastHash` 判重就正好会把「状态已丢但内容没变」这种情况跳过去
+- 老 PiDeck / 纯终端不认这个字段 → 桥行为不变；
+  `UIBridgeTransport.onResync?()` 是**可选方法**，自定义 transport 没实现时静默跳过（§7）
+
+**为什么 `ctx.gui` 要单独补一趟**：`runtime.resync()` 原本只遍历 `state.tracked`
+（被 `wrapUI` 接管的 `ctx.ui.*`），而 `ctx.gui.*` 的贡献存在 `gui.ts` 自己的
+`contributions` / `overlays` 里，那边看不到 —— 不补就漏掉 `setSettingsSection` 这类落点。
+
 ---
 
 ## 7. 容错承诺（fail-safe）

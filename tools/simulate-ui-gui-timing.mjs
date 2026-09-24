@@ -9,6 +9,8 @@
  * [3] 低层：recording transport 验证贡献推送、去重、/reload 幂等（验收 3）
  * [4] 纯终端（PIDECK_BRIDGE_URL 未设）：gui 仍挂，但 **ctx.ui 函数面一个不改**（验收 4）
  * [5] TUI 模式守卫（URL 已设但 mode="tui"）：同样不改函数面（终端渲染不被夺走）
+ * [6] 重同步（resync）：PiDeck 要快照时 ctx.gui 贡献全量重推（force 绕过去重），
+ *     且旧 transport 无 onResync 时不抛错（fail-safe）
  *
  * 用 jiti 直接加载**真实桥代码**，runner 语义按 pi dist 2026-02 快照复刻：
  * - emit：一次 emit 只建一次 ctx，handler 按注册顺序共享（runner.js emit）；
@@ -294,6 +296,59 @@ console.log("\n[5] TUI 模式守卫（URL 已设 + mode=tui）：桥不接管 UI
 	ok(runner.uiContext.setWidget === uiInstance.setWidget, "ctx.ui.setWidget 未被替换（终端组件渲染不被夺走）");
 	ok(runner.uiContext.__pideckBridgeWrapped !== true, "无包装标记（wrapUI 未执行）");
 	await runner.emit("session_shutdown");
+}
+
+// ── [6] 重同步：PiDeck 要快照 → ctx.gui 贡献全量重推 ────────────
+console.log("\n[6] 重同步（resync）：PiDeck 要快照时 ctx.gui 贡献全量重推，且旧 transport 无 onResync 也不炸");
+{
+	delete process.env.PIDECK_BRIDGE_URL;
+	runtimeModule.resetBridgeRuntimeForTests();
+	const pushed = [];
+	let resyncHandler = null;
+	const transport = {
+		available: true,
+		push(update) {
+			pushed.push(update);
+		},
+		onEvent() {},
+		onResync(handler) {
+			resyncHandler = handler;
+		},
+		close() {},
+	};
+	const runtime = runtimeModule.getBridgeRuntime(transport);
+	const fakeCtx = { ui: noOpLike(), mode: "rpc", hasUI: true };
+	guiModule.installGuiNamespace(fakeCtx, runtime);
+	guiModule.installGuiOnUiSingleton(fakeCtx.ui, runtime);
+
+	ok(typeof resyncHandler === "function", "runtime 把 resync 注册到了 transport.onResync");
+
+	fakeCtx.ui.gui.setSettingsSection("ext-points", () => ({ kind: "text", text: "hi" }), { title: "扩展点", order: 900 });
+	const slot = (u) => u?.type === "ui-update" && u?.targetId === "gui:settings.section:ext-points";
+	ok(pushed.filter(slot).length === 1, "重同步前：贡献只推过 1 次");
+
+	// 模拟 PiDeck 在轮询响应体里回 `resync: true`
+	resyncHandler();
+	ok(pushed.some((u) => u?.type === "resync"), "重同步帧里有 resync 标记（PiDeck 据此清空旧状态）");
+	ok(pushed.filter(slot).length === 2, "重同步后：同 targetId 的 ui-update 又推了一次（force 绕过 lastHash 去重）");
+	ok(guiSpec.guiState(runtime).contributions.size === 1, "重推不新增贡献（仍 1 条）");
+
+	// 关键：内容没变也必须重推 —— 这正是「卡片永久消失」的根因场景
+	resyncHandler();
+	ok(pushed.filter(slot).length === 3, "内容未变也照推（force=true，不靠 lastHash 判定）");
+
+	runtime.shutdown();
+
+	// fail-safe：自定义 transport 没有 onResync 时不得抛错（§14.5）
+	runtimeModule.resetBridgeRuntimeForTests();
+	const legacy = { available: true, push() {}, onEvent() {}, close() {} };
+	let threw = null;
+	try {
+		runtimeModule.getBridgeRuntime(legacy);
+	} catch (error) {
+		threw = error;
+	}
+	ok(threw === null, "旧 transport 无 onResync：不抛错（可选链防御，§14.5）");
 }
 
 delete process.env.PIDECK_BRIDGE_URL;
