@@ -518,10 +518,22 @@ export function getBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime {
 	return sharedRuntime;
 }
 
-/** 仅测试用：重置单例。 */
-export function resetBridgeRuntimeForTests(): void {
+/**
+ * 关闭并丢弃进程级单例（正式路径，供 session_shutdown 调用）。
+ *
+ * /reload 语义：session_shutdown（reason=reload）先到，随后新 session_start——
+ * 若不置空 sharedRuntime，新 session 会复用已 shutdown（transport closed）的旧
+ * runtime，桥从此「静默死亡」。置空后由下一次 ensureRuntime 重建全新 runtime。
+ * （`resetBridgeRuntimeForTests` 保留为测试别名语义，本函数是它的正式版。）
+ */
+export function shutdownBridgeRuntime(): void {
 	sharedRuntime?.shutdown();
 	sharedRuntime = null;
+}
+
+/** 仅测试用：重置单例（正式路径见 shutdownBridgeRuntime）。 */
+export function resetBridgeRuntimeForTests(): void {
+	shutdownBridgeRuntime();
 }
 
 // ── 事件回灌实现（§8.3，Phase 0 S4b 实测修正版）─────────────────

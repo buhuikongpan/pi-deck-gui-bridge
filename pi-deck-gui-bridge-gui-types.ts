@@ -9,7 +9,7 @@
  * 放在独立文件也消除了两者之间的循环依赖。
  */
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { GuiNode, OverlayOptions, Tone, Variant } from "./pi-deck-gui-bridge-types";
 import type { BridgeTheme } from "./pi-deck-gui-bridge-theme";
 
@@ -80,6 +80,24 @@ export type GuiCustomOptions = {
 	size?: { width?: number | string; height?: number | string };
 	onHandle?: (handle: GuiHandle) => void;
 	onDismiss?: () => void;
+};
+
+/**
+ * 「桥最先可用」暴露声明（PROMPT §四.A / §五，2026-02-23 选定命名：`ui.gui`）。
+ *
+ * 桥把 `GuiNamespace` 同时挂在两处，且两者是**同一个对象**（`ctx.gui === ctx.ui.gui`）：
+ * 1. `ctx.gui` —— 当前 emit 的 ctx 上（桥挂载后的所有事件可用，向后兼容内置消费者）；
+ * 2. `ctx.ui.gui` —— `ctx.ui` **共享单例**上（**推荐**：与 `wrapUI` 同机制，
+ *    不依赖扩展加载顺序；桥的 session_start 挂载之后的任何事件 / 命令 handler
+ *    里 `ctx.ui.gui` 都可靠可用。先于桥注册的扩展在自己的 session_start
+ *    同步段里取不到，从 agent_start 起必然可用）。
+ *
+ * pi 原生 `ExtensionUIContext` 现无 `gui` 字段；为作者侧取用提供交集类型，
+ * 桥未加载（纯终端）时运行时不存在，取用前请判空。
+ */
+export type GuiUiContext = ExtensionUIContext & {
+	/** 桥挂在共享 ui 单例上的 GUI 扩展点（纯终端模式下为 undefined）。 */
+	readonly gui?: GuiNamespace;
 };
 
 /** `ctx.gui` 的形状（§7.1）。 */

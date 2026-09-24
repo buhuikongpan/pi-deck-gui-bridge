@@ -34,6 +34,46 @@ pi 以 `--mode rpc` 运行时没有终端，`rpc-mode.js` 里一批 UI 方法被
 桥在 `session_start` 里**包装一次共享的 `ctx.ui`**，把上表里被丢掉的点接回来。
 （`ctx.ui` 是共享单例的活 getter，包装一次即对全部扩展生效。）
 
+**仅 RPC 模式包装**：v1.1.0 起桥在包装前检查 `ctx.ui` 的函数面 ——
+检测到纯终端模式（setStatus 带原生 TUI 行为、无 PiDeck 环境变量）时**不做包装**，
+pi-tui 的原生渲染链完全不动（纯终端跑 pi 不会因装了桥而卡死）。
+
+### 挂载时机（v1.1.0 起）：为什么推荐 `ctx.ui.gui`
+
+桥分三层挂载，逐层提前、互为兑底：
+
+| 时机 | 做什么 | 给谁用 |
+|---|---|---|
+| `session_start` | 包装 `ctx.ui`（RPC 模式）+ 在**共享 ui 单例**上挂 `ui.gui` | 声明式扩展点 |
+| `project_trust` | pi 替换 ctx（含新临时 ui）后**同步重挂**，保证接在最终对象上 | 修 pi 时序坑 |
+| `agent_start` | 兑底幂等重挂 | `/reload` 等不走 session_start 的路径 |
+
+**扩展作者怎么拿 `ctx.gui` / GUI 命名空间**：
+
+```ts
+// ✅ 推荐：ctx.ui.gui —— 挂在共享 ui 单例上，不依赖扩展与桥的加载顺序
+pi.on("session_start", (_event, ctx) => {
+  const gui = (ctx.ui as { gui?: GuiNamespace }).gui;   // 可能 undefined（见下）
+  if (gui) gui.setSettingsSection("my-key", factory);
+});
+
+// ✅ 推荐：agent_start 时 ctx.ui.gui 必已就绪（桥的 session_start 已跑完）
+pi.on("agent_start", (_event, ctx) => {
+  (ctx.ui as { gui?: GuiNamespace }).gui?.setSettingsSection("my-key", factory);
+});
+
+// ⚠️ 兼容：ctx.gui 只挂在当次 emit 的 ctx 上，仅桥加载完成后的 ctx 才有
+console.log(ctx.gui);  // 老代码继续工作，但推荐迁移到 ctx.ui.gui
+```
+
+**为什么 `session_start` 同步段拿不到**：pi 按注册顺序**串行 await** 逐个执行
+同一次 emit 的 handler；桥以 `-e` 注入排在用户扩展之后，所以扩展 handler 跑的时候
+桥还没挂。解法三选一：`agent_start` 里再试（必成）、`setTimeout(0)` 后再试
+（宏任务必晚于本次 emit 全部 handler，也必成）、或兼容旧桥时用指数退避。
+
+> pi 原生扩展点的加载顺序（项目 → 全局 → `-e`）不可改 —— 桥永远后于全局扩展。
+> `ui.gui` 单例挂载就是为了把这个顺序问题对扩展作者隐藏掉。
+
 ---
 
 ## 安装
@@ -85,7 +125,8 @@ PiDeck 已把本扩展列为内置扩展（`resources/extensions/` + `extensions
 > 这三个变量由 **PiDeck 在 spawn pi 时注入，与桥以哪种方式安装无关** ——
 > 即使你手动装桥，只要跑在 PiDeck 里，通路就是通的。
 >
-> **纯终端跑 pi 时**（没有这些变量）：桥**静默不工作**，pi 行为完全不变。
+> **纯终端跑 pi 时**（没有这些变量）：桥**静默不工作**，且不做任何 `ctx.ui` 包装，
+> pi 行为完全不变（v1.1.0 起 TUI 函数面原样保留，终端渲染零影响）。
 
 ---
 
@@ -100,7 +141,8 @@ PiDeck 已把本扩展列为内置扩展（`resources/extensions/` + `extensions
 | `PIDECK_BRIDGE_TOKEN` | 本次 spawn 独享的令牌（多会话天然隔离） |
 | `PIDECK_BRIDGE_PI_PATH` | pi 安装路径（桥据此定位**与 pi 同实例**的 pi-tui） |
 
-**纯终端跑 pi 时**（没有这些环境变量）：桥**静默不工作**，pi 行为完全不变。---
+**纯终端跑 pi 时**（没有这些环境变量）：桥**静默不工作**，且不做任何 `ctx.ui` 包装，
+pi 行为完全不变（v1.1.0 起 TUI 函数面原样保留）。---
 
 ## 3. 直接用 `ctx.ui` 的扩展点（A 组）
 
@@ -150,6 +192,10 @@ export default function myExtension(pi: ExtensionAPI): void {
 **这个扩展完全不知道 PiDeck 存在**，但它写的 UI 会出现在 GUI 里。---
 
 ## 4. GUI 专属扩展点（`ctx.gui`，B 组）
+
+> **获取命名空间**：优先 `ctx.ui.gui`（共享 ui 单例，不依赖加载顺序，v1.1.0）；
+> `ctx.gui` 仅存在于桥已挂载的当次 emit ctx 上，作为兼容路径保留。
+> 详见上方「挂载时机」。
 
 `ctx.gui` 的方法与 `ctx.ui` **同形**：同样的 `set*` 命名、同样的
 `(…, theme) => Component` 工厂、同样的「传 `undefined` 即恢复默认」、
@@ -484,10 +530,12 @@ GUI 上的一次点击 → PiDeck 回传事件 → 桥在 pi 进程内调**公�
 
 | 日志 | 含义 |
 |---|---|
-| `已包装 ctx.ui 的声明式扩展点（…）` | 桥已挂载成功 |
+| `已包装 ctx.ui 的声明式扩展点（…）` | 桥已包装成功（RPC 模式） |
 | `pi-tui 已加载: <来源>` | 语义化翻译可用（`instanceof` 生效） |
 | `pi-tui 加载失败，适配器退化为形状判定` | 仍可用，但组件识别精度下降 |
-| `PIDECK_BRIDGE_URL 未设置：桥静默不工作` | 纯终端模式，符合预期 |
+| `桥已在 session_start 挂载（RPC 模式，已接管声明式 UI 扩展点）` | 桥本次挂载完成（v1.1.0 起含 ui 单例挂 gui） |
+| `非 RPC 模式（mode=…）：桥不接管 UI，仅挂 gui 扩展点` | TUI 守卫生效：pi 终端渲染未动，符合预期 |
+| `PIDECK_BRIDGE_URL 未设置：桥静默不工作（纯终端模式，仅挂 gui 扩展点，pi 行为不变）` | 纯终端模式，符合预期；`ctx.ui.gui` 仍可挂 UI 落点（无处渲染，不报错） |
 | `落点 xxx 的 factory 抛错，该落点隐藏` | 你的 `factory` 抛了异常，检查扩展代码 |
 | `落点 xxx 的 render() 返回值非法，该贡献隐藏` | `render()` 返回的不是合法 `GuiNode` |
 | `ctx.gui 无法挂到 ctx（可能被 freeze）` | 退化为模块级函数，改用 `import { guiSet } from "…"` |
@@ -512,7 +560,15 @@ pi-deck-gui-bridge/
 ├── pi-deck-gui-bridge-runtime.ts       # 拦截层 + ticker + 事件回灌
 ├── pi-deck-gui-bridge-gui-types.ts     # ctx.gui 公开类型（作者契约）
 ├── pi-deck-gui-bridge-gui-spec.ts      # 白名单 / 上限 / 校验 / 状态
-└── pi-deck-gui-bridge-gui.ts           # 落点 setter + 命名空间装配
+└── pi-deck-gui-bridge-gui.ts           # 落点 setter + 命名空间装配（含 ui 单例挂载）
+```
+
+### tools/（开发辅助，不随扩展分发加载）
+
+```
+tools/
+├── simulate-ui-gui-timing.mjs          # 桥挂载时序模拟：5 场景 28 断言（RPC/纯终端/TUI 守卫/project_trust）
+└── debug-push.mjs                      # 手动向运行中的桥推一帧调试
 ```
 
 **零构建**：全部是纯 `.ts`，Node 24 的原生类型擦除即可直接执行 ——

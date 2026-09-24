@@ -3,13 +3,28 @@
  *
  * **交付物**：把 pi 在 RPC 模式下被丢弃的声明式 UI 扩展点接回 PiDeck。
  *
- * ## 拦截时机（Phase 0 S1 实测结论）
+ * ## 拦截时机（Phase 0 S1 实测结论 + 「桥最先可用」改进，PROMPT 2026-02-23）
  *
  * pi 的 `runner.js:553` 用 `get ui() { return runner.uiContext }` **活取值**返回
  * **一份共享实例**。因此桥只要在拿到 `ctx` 后对 `runner.uiContext` 做一次属性替换，
  * 同一进程内**其余全部扩展**随后取到的 `ctx.ui` 都已是包装版。
  *
  * 桥不「抢在 RPC 降级之前」，而是**替换掉降级后的空实现** —— 比计划预期更简单。
+ *
+ * ## 「桥最先可用」：gui 能力不依赖扩展加载顺序（PROMPT §三/§四）
+ *
+ * pi 的加载顺序（项目 → 全局 `~/.pi/agent/extensions` → `-e` 显式）**不可更改**，
+ * 桥（经 PiDeck 以 `-e` 注入）永远排在全局用户扩展之后；同一 emit 的 handler
+ * 按注册顺序共享同一个 ctx 执行，所以先注册的扩展跑时 `ctx.gui` 还没挂上。
+ *
+ * 解法不是让桥先加载，而是让 **gui 能力先可用**：
+ * - **A（主方案）**：把 `gui` getter 同时挂上 `ctx.ui` **共享单例**
+ *   （`installGuiOnUiSingleton`）——与 `wrapUI` 同机制：任何加载顺序的扩展、
+ *   任何后续事件 / 命令 handler 里，`ctx.ui.gui` 都可靠可用。
+ * - **B（铺垫）**：在 `project_trust`（早于 session_start）里预热 runtime/transport，
+ *   并对 pi 传入的 trust ui 尽力挂 `gui`。实测 pi 在 trust 期给的是**临时 ui 对象**
+ *   （runner 尚未创建），真单例要到 session_start 才存在——故 B 只是铺垫，不承担主救济。
+ * - `session_start` / `agent_start` 保留为幂等挂载点（`ctx.gui` 向后兼容不动）。
  *
  * ## 实现纪律（§14）
  *
@@ -29,9 +44,9 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createHttpTransport, createNullTransport, type UIBridgeTransport } from "./pi-deck-gui-bridge-transport";
-import { getBridgeRuntime, type BridgeRuntime } from "./pi-deck-gui-bridge-runtime";
-import { installGuiNamespace } from "./pi-deck-gui-bridge-gui";
+import { createHttpTransport, type UIBridgeTransport } from "./pi-deck-gui-bridge-transport";
+import { getBridgeRuntime, shutdownBridgeRuntime, type BridgeRuntime } from "./pi-deck-gui-bridge-runtime";
+import { installGuiNamespace, installGuiOnUiSingleton } from "./pi-deck-gui-bridge-gui";
 import { loadPiTui } from "./pi-deck-gui-bridge-tui";
 
 const log = (message: string): void => {
@@ -48,7 +63,7 @@ const log = (message: string): void => {
  */
 let runtime: BridgeRuntime | null = null;
 
-/** 取通路：env 缺失时返回 null 通路（桥整体静默，pi 行为不变，§12.4）。 */
+/** 取通路：env 缺失时 createHttpTransport 内部返回 null 通路（桥整体静默，§12.4）。 */
 function ensureTransport(): UIBridgeTransport {
 	return createHttpTransport(log);
 }
@@ -66,6 +81,18 @@ function ensureRuntime(): BridgeRuntime {
  *
  * 这是整个方案的支点：`ctx.ui` 是共享单例的活 getter（Phase 0 S1 实测），
  * 所以在这里 patch 一次即可覆盖所有扩展。
+ *
+ * ## TUI 守卫（2026-02-23 实测：终端下包装会搞挂终端）
+ *
+ * 只有 **PiDeck 的 RPC 会话**（transport 可用 且 `ctx.mode === "rpc"`）才允许桥
+ * **改动 ctx.ui 的函数面**（wrapUI / startTicker / pi-tui 适配）。pi 的模式值域
+ * （runner.js `setUIContext(uiContext, mode = "print")`）：`"tui"`（终端交互）、
+ * `"print"` / `"json"`（非交互）、`"rpc"`（PiDeck）。TUI 模式下 pi 原生渲染
+ * `setWidget` 组件 / `setEditorComponent`，桥包装后改道 PiDeck 协议 → 终端渲染被夺走。
+ *
+ * 非 RPC 场景仍然**挂 gui getter**（`ctx.gui` / `ctx.ui.gui`，defineProperty 无副作用、
+ * 不改任何原生方法），满足「纯终端静默但仍挂」（PROMPT §五）——
+ * 扩展取 `ctx.ui.gui` 永远不炸；贡献只是无处渲染，不产生终端干扰。
  */
 function attachBridge(ctx: ExtensionContext, where: string): void {
 	try {
@@ -73,13 +100,20 @@ function attachBridge(ctx: ExtensionContext, where: string): void {
 		if (!ui || typeof ui !== "object") return;
 		const bridge = ensureRuntime();
 
-		// 通路不可用（纯终端跑 pi）→ 静默不工作，但**仍然挂 ctx.gui**，
-		// 这样扩展 import 我们的模块级函数不会拿到 undefined。
-		if (!bridge.transport.available) {
+		// TUI 守卫：非 PiDeck RPC 会话绝不改函数面，只挂无副作用的 gui getter。
+		const rpcActive = bridge.transport.available && ctx.mode === "rpc";
+		if (!rpcActive) {
 			if (!(ui as { __pideckBridgeNotified?: boolean }).__pideckBridgeNotified) {
 				Object.defineProperty(ui, "__pideckBridgeNotified", { value: true, enumerable: false, configurable: true });
-				log("PIDECK_BRIDGE_URL 未设置：桥静默不工作（纯终端模式，pi 行为不变）");
+				log(
+					bridge.transport.available
+						? `非 RPC 模式（mode=${String(ctx.mode)}）：桥不接管 UI，仅挂 gui 扩展点（pi 终端渲染不受影响）`
+						: "PIDECK_BRIDGE_URL 未设置：桥静默不工作（纯终端模式，仅挂 gui 扩展点，pi 行为不变）",
+				);
 			}
+			installGuiNamespace(ctx, bridge);
+			installGuiOnUiSingleton(ui, bridge);
+			return;
 		}
 
 		const alreadyWrapped = (ui as { __pideckBridgeWrapped?: boolean }).__pideckBridgeWrapped === true;
@@ -93,19 +127,50 @@ function attachBridge(ctx: ExtensionContext, where: string): void {
 			} else {
 				log(`pi-tui 加载失败，适配器退化为形状判定: ${tuiResult.error}`);
 			}
-			log(`桥已在 ${where} 挂载`);
 		}
 
 		// ctx.gui 命名空间（§7）：挂 getter，挂不上则退化为模块级导出
 		installGuiNamespace(ctx, bridge);
+		// ui 共享单例也挂 gui（「最先可用」主方案）：先于桥注册的扩展从 ctx.ui.gui 取
+		installGuiOnUiSingleton(ui, bridge);
+		log(`桥已在 ${where} 挂载（RPC 模式，已接管声明式 UI 扩展点）`);
 	} catch (error) {
 		// 任何失败都只意味着「某个点在 GUI 里没出现」，绝不影响 pi（§14.5）
 		log(`attachBridge 抛错（已吞，pi 不受影响）: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
+/**
+ * project_trust（PROMPT §四.B）：pi 文档明确它早于 project extensions 加载、
+ * 早于一切 session_start，且显式（-e）扩展可参与。
+ *
+ * **实测边界**（pi dist 2026-02 快照）：此事件的 `ctx.ui` 是 pi 现造的**临时对象**
+ * （interactive-mode.js:1962 `createProjectTrustContext` 每次 new 一个字面量），
+ * 且此刻 runner 尚未创建——后续 session 的共享 ui 单例还不存在。
+ * 所以这里只做两件低成本铺垫，**不**调用 `installGuiNamespace`（那会拿
+ * 临时对象污染 `state.ctx` 渲染上下文）：
+ * 1. 预热 runtime / transport（纯终端模式下也只是静默，pi 行为不变）；
+ * 2. 对传入的 trust ui 尽力挂 `gui`（惠及在信任期内就取 ctx.ui 的扩展，失败即吞）。
+ *
+ * 桥对信任判定**永远弃权**（`undecided`），不改变 pi 的信任流程。
+ */
+function attachProjectTrustBridge(ctx: { ui?: unknown }): void {
+	try {
+		const bridge = ensureRuntime();
+		installGuiOnUiSingleton(ctx?.ui, bridge);
+	} catch (error) {
+		log(`attachProjectTrustBridge 抛错（已吞，pi 不受影响）: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
 export default function piDeckGuiBridgeExtension(pi: ExtensionAPI): void {
-	// session_start 是最早能拿到 ctx 的稳定时机，也是包装的最佳落点。
+	// project_trust 是最早可得的事件（早于一切 session_start）；桥永远弃权信任判定。
+	pi.on("project_trust", async (_event, ctx) => {
+		attachProjectTrustBridge(ctx);
+		return { trusted: "undecided" };
+	});
+
+	// session_start 是最早能拿到 session ctx 的稳定时机，也是包装的最佳落点。
 	pi.on("session_start", async (_event, ctx) => {
 		attachBridge(ctx, "session_start");
 	});
@@ -115,10 +180,11 @@ export default function piDeckGuiBridgeExtension(pi: ExtensionAPI): void {
 		attachBridge(ctx, "agent_start");
 	});
 
-	// 会话结束：停 ticker、清贡献（§7.7）
+	// 会话结束：停 ticker、清贡献（§7.7）；置空引用，/reload 后新 session 重建全新 runtime
 	pi.on("session_shutdown", async () => {
 		try {
-			runtime?.shutdown();
+			shutdownBridgeRuntime();
+			runtime = null;
 		} catch (error) {
 			log(`shutdown 抛错（已吞）: ${error instanceof Error ? error.message : String(error)}`);
 		}
