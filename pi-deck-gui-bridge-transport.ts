@@ -19,6 +19,16 @@ export type UIBridgeTransport = {
 	push(update: UIBridgeUpdate): void;
 	/** 注册事件处理器（PiDeck 回灌的交互事件）。 */
 	onEvent(handler: (event: UIBridgeEvent) => void): void;
+	/**
+	 * 注册「全量重推」处理器：PiDeck 在响应体里回 `resync: true` 时触发（§9.4）。
+	 *
+	 * 用于 PiDeck 渲染层丢失桥状态后要一次快照 —— 落点是一次性推送，
+	 * 不主动要就不会回来。多个处理器互不影响。
+	 *
+	 * **可选方法**（§14.5 fail-safe）：自定义/旧版 transport 没实现时，
+	 * 桥只是收不到重同步请求，**不得因此抛错影响 pi 会话**。
+	 */
+	onResync?(handler: () => void): void;
 	/** 关闭（停轮询、清 pending）。 */
 	close(): void;
 	/** 通路是否可用（env 缺失时为 false，桥据此整体静默）。 */
@@ -55,6 +65,7 @@ export function createHttpTransport(log: Logger): UIBridgeTransport {
 	const endpoint = `${url.replace(/\/+$/, "")}/ui`;
 	const pending: UIBridgeUpdate[] = [];
 	let handlers: ((event: UIBridgeEvent) => void)[] = [];
+	let resyncHandlers: (() => void)[] = [];
 	let timer: NodeJS.Timeout | null = null;
 	let closed = false;
 	let inFlight = false;
@@ -94,6 +105,17 @@ export function createHttpTransport(log: Logger): UIBridgeTransport {
 				}
 			}
 			idleTicks = hadWork || response?.events?.length ? 0 : idleTicks + 1;
+			// PiDeck 要求全量重推（§9.4）：在事件回灌之后、下一轮之前重推快照。
+			// 单个处理器抛错不影响其他，也不影响后续轮询。
+			if (response?.resync) {
+				for (const handler of resyncHandlers) {
+					try {
+						handler();
+					} catch (error) {
+						log(`全量重推处理器抛错（已吞）: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}
+			}
 			schedule(idleTicks >= IDLE_AFTER_TICKS ? IDLE_INTERVAL_MS : ACTIVE_INTERVAL_MS);
 		} catch (error) {
 			failureCount += 1;
@@ -124,12 +146,16 @@ export function createHttpTransport(log: Logger): UIBridgeTransport {
 		onEvent(handler) {
 			handlers.push(handler);
 		},
+		onResync(handler) {
+			resyncHandlers.push(handler);
+		},
 		close() {
 			closed = true;
 			if (timer) clearTimeout(timer);
 			timer = null;
 			pending.length = 0;
 			handlers = [];
+			resyncHandlers = [];
 		},
 	};
 }
@@ -140,6 +166,7 @@ export function createNullTransport(): UIBridgeTransport {
 		available: false,
 		push() {},
 		onEvent() {},
+		onResync() {},
 		close() {},
 	};
 }

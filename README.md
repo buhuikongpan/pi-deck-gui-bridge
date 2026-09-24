@@ -491,6 +491,23 @@ GUI 上的一次点击 → PiDeck 回传事件 → 桥在 pi 进程内调**公�
 - 回灌只承诺 `select` / `navigate` / `input` / `key` / `filter` / `action` 六类
 - 部分组件的交互无法用公开方法驱动（如 `Editor` 的光标位置）→ 该组件降级为只读展示
 
+### 重同步：PiDeck 主动要快照
+
+桥的落点是**一次性推送** —— 推过了就不再推。只要 PiDeck 渲染层丢一次状态
+（换 agent 绑定、聚焦会话切换、设置弹窗重开、应用重启），贡献就**永远不回来**。
+
+所以 PiDeck 会在轮询响应体里回一个标志，要桥重推一次：
+
+```ts
+type UIBridgeResponse = { events?: UIBridgeEvent[]; resync?: boolean };
+```
+
+- 桥看到 `resync: true` → 全量重推（status / working / title / 全部落点 + `ctx.gui` 全部贡献）
+- **绕过去重**：内容没变也重发 —— 靠 `lastHash` 判重正好会跳过「状态丢了但内容没变」这种情况
+- 老 PiDeck / 纯终端不认这个字段 → 桥行为不变；`onResync?()` 是可选方法，没实现就静默跳过
+
+对扩展作者**透明**：不需要做任何事，重推的是桥已记录的那份贡献。
+
 ---
 
 ## 10. 零构建约束
@@ -567,7 +584,7 @@ pi-deck-gui-bridge/
 
 ```
 tools/
-├── simulate-ui-gui-timing.mjs          # 桥挂载时序模拟：5 场景 28 断言（RPC/纯终端/TUI 守卫/project_trust）
+├── simulate-ui-gui-timing.mjs          # 桥挂载时序模拟：6 场景 35 断言（RPC/纯终端/TUI 守卫/project_trust/重同步）
 └── debug-push.mjs                      # 手动向运行中的桥推一帧调试
 ```
 
