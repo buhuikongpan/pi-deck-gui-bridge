@@ -83,6 +83,30 @@ export type UINode =
 	| ({ kind: "split"; direction: "column" | "row"; ratio?: number; children: UINode[] } & NodeBase)
 	| ({ kind: "card"; title?: string; children: UINode[] } & NodeBase)
 	/**
+	 * **原生设置块**：映射宿主设置页的「淡色框」（PiDeck 侧为 `SettingBox`）。
+	 *
+	 * 为什么需要：扩展自己拼卡片/文字/间距做出来的设置区，字号行高分隔线与
+	 * 宿主设置页不一致，一眼就看得出是「外挂」；而调参永远调不出同源观感 ——
+	 * 唯一可靠的办法是**把排版权交回宿主**（§2「直接复用 PiDeck UI」）。
+	 *
+	 * `setting-box` + `setting-row` 就是把贡献投影到宿主**真实**的设置页组件上，
+	 * 宿主主题/字号/行高/控件列宽一变，贡献跟着变。
+	 */
+	| ({ kind: "setting-box"; children: UINode[] } & NodeBase)
+	/**
+	 * **原生设置行**：映射宿主设置页的行式布局（PiDeck 侧为 `SettingRow`）。
+	 *
+	 * - `title` 左列标题；`description` 左列小字说明；
+	 * - `level: 1` 分区标题行（加粗加大）；缺省 `2` 是普通行；
+	 * - `stacked: true` 降为单列：标题在上、控件占满整行（文本输入/文本域用）；
+	 * - `alignEnd` 缺省 `true`（控件右对齐）；`select` 类传 `false` 撑满控件列；
+	 * - `anchor` 是宿主命令面板的深链锚点（宿主自行决定用不用）；
+	 * - `children` 是右侧控件，通常 1 个。
+	 *
+	 * 宿主不认这两个 kind 时按 §7.5 降级渲染，**绝不抛错**。
+	 */
+	| ({ kind: "setting-row"; title: string; description?: string; level?: 1 | 2; stacked?: boolean; alignEnd?: boolean; anchor?: string; children: UINode[] } & NodeBase)
+	/**
 	 * 可折叠分组（折叠态由**渲染器**持有，见 `LocalFlag`）。
 	 *
 	 * `label` 是分组标题，`count` 是标题右侧的计数（可选），

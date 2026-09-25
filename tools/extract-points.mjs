@@ -180,6 +180,7 @@ const GUI_SLOT_HOSTS = {
 	"dialog.action": { host: "src/renderer/src/components/ui-shadcn/ConfirmDialog.tsx", where: "AlertDialogFooter 内、既有按钮之前", keyMeaning: "贡献标识", order: true },
 	"dialog.body": { host: "src/renderer/src/components/ui-shadcn/ConfirmDialog.tsx", where: "AlertDialogHeader 之后", keyMeaning: "贡献标识", order: true },
 	"settings.section": { host: "src/renderer/src/components/app/SettingsModal.tsx", where: "全部设置 tab 之下", keyMeaning: "贡献标识", order: true },
+	"config.page": { host: "src/renderer/src/ConfigModal.tsx", where: "「Pi 管理」侧栏「Agent 能力」组内（一项一个二级 TabTrigger + 对应 TabContent）", keyMeaning: "贡献标识，`slot.title` 即导航项文字，可多页共存", order: true },
 	"session.item": { host: "src/renderer/src/components/sidebar/SessionTree.tsx", where: "历史会话行之后", keyMeaning: "贡献标识", order: true },
 	"context.menu": { host: "src/renderer/src/components/sidebar/SidebarComponents.tsx", where: "MenuShell（侧边栏右键菜单共享壳）内、原有条目之后", keyMeaning: "贡献标识", order: true },
 };
@@ -246,7 +247,7 @@ function main() {
 	const problems = [];
 	if (uiMembers.length === 0) problems.push("没抽到 ExtensionUIContext 成员（pi 版本变了？）");
 	if (events.length === 0) problems.push("没抽到扩展事件名");
-	if (guiSlots.length !== 14) problems.push(`PiDeck 落点数应为 14，实际 ${guiSlots.length}`);
+	if (guiSlots.length !== 15) problems.push(`PiDeck 落点数应为 15，实际 ${guiSlots.length}`);
 	for (const { slot } of guiSlots) {
 		if (!GUI_SLOT_HOSTS[slot]) problems.push(`落点 "${slot}" 在策展表里没有宿主记录`);
 	}

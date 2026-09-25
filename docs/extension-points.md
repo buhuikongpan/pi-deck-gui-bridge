@@ -174,6 +174,7 @@ declare function setXxx(key: string, factory: GuiFactory | undefined, opts?: Gui
 | `setDialogAction` | 对话框按钮区 | `ui-shadcn/ConfirmDialog.tsx` | 贡献标识 |
 | `setDialogBody` | 对话框主体下方 | `ui-shadcn/ConfirmDialog.tsx` | 贡献标识 |
 | `setSettingsSection` | 设置弹窗内 | `app/SettingsModal.tsx` | 贡献标识 |
+| `setConfigPage` | 「Pi 管理」侧栏的独立整页 | `ConfigModal.tsx` | 贡献标识 |
 | `setSessionItemExtra` | 会话列表条目 | `sidebar/SessionTree.tsx` | 贡献标识 |
 | `setContextMenuItem` | 右键菜单 | `sidebar/SidebarComponents.tsx` | 贡献标识 |
 

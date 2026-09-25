@@ -102,7 +102,7 @@ export type GuiUiContext = ExtensionUIContext & {
 
 /** `ctx.gui` 的形状（§7.1）。 */
 export type GuiNamespace = {
-	// B 组：GUI 专属位置（14 个，与 §7.1-B 表一一对应）
+	// B 组：GUI 专属位置（15 个，与 §7.1-B 表一一对应）
 	setSidebarPanel: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
 	setSidebarSection: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
 	setContentView: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
@@ -115,6 +115,11 @@ export type GuiNamespace = {
 	setDialogAction: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
 	setDialogBody: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
 	setSettingsSection: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
+	/**
+	 * 在 PiDeck「Pi 管理」侧栏的「Agent 能力」组里新增一个整页。
+	 * `options.title` 就是导航项的文字；缺省用 key。同 `order` 按 key 字母序。
+	 */
+	setConfigPage: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
 	setSessionItemExtra: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
 	setContextMenuItem: (key: string, factory: GuiFactory | undefined, options?: GuiSlotOptions) => void;
 	// C 组：交互与服务

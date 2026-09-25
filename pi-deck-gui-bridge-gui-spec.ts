@@ -33,6 +33,9 @@ export const GUI_SLOT_METHODS = {
 	setDialogAction: "dialog.action",
 	setDialogBody: "dialog.body",
 	setSettingsSection: "settings.section",
+	// 配置页：在 PiDeck「Pi 管理」侧栏的「Agent 能力」组里多出一个整页。
+	// 与 settings.section 的区别：那个是设置弹窗底部追加的一块，这个是货真价实的一级导航项。
+	setConfigPage: "config.page",
 	setSessionItemExtra: "session.item",
 	setContextMenuItem: "context.menu",
 } as const;
