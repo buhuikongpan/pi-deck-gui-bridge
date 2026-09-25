@@ -101,6 +101,13 @@ export type GuiContribution = {
 	component?: GuiComponent;
 	/** 上次推送的哈希（变更检测）。 */
 	lastHash?: string;
+	/**
+	 * 最近一次推送给 PiDeck 的树（含 slot 元信息）。
+	 *
+	 * 事件回落时按 `nodeId` 在各自的树里反查归属（§8.3）—— 扩展自己决定节点 id，
+	 * 不在桥侧另建索引，避免两份真相。
+	 */
+	lastNode?: GuiNode;
 	/** 是否有效（校验失败即 false，贡献隐藏）。 */
 	valid: boolean;
 	/** 归属扩展名（卸载即清，§7.7）。 */

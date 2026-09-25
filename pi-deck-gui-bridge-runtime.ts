@@ -19,10 +19,11 @@
 
 import type { UIBridgeUpdate } from "./pi-deck-gui-bridge-types";
 import type { UIBridgeTransport } from "./pi-deck-gui-bridge-transport";
-import { repushGuiState } from "./pi-deck-gui-bridge-gui";
+import { repushGuiState, findContributionNode } from "./pi-deck-gui-bridge-gui";
 import { hashUINode, serialize, componentOf, invokeAction } from "./pi-deck-gui-bridge-serialize";
 import { createBridgeTheme, type BridgeTheme } from "./pi-deck-gui-bridge-theme";
 import { loadPiTui, type PiTuiComponent, type PiTuiModule } from "./pi-deck-gui-bridge-tui";
+import type { GuiComponent } from "./pi-deck-gui-bridge-gui-types";
 
 /** 落点 id（与 PiDeck 侧约定）。 */
 export const TARGET = {
@@ -482,29 +483,39 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 	}
 
 	/** 处理 PiDeck 回灌的交互事件（§8.3）。 */
-	function handleEvent(event: { type: string; nodeId?: string; actionId?: string; index?: number; value?: string; key?: string; payload?: unknown }): void {
+	function handleEvent(event: { type: string; nodeId?: string; actionId?: string; index?: number; value?: string; key?: string; filter?: string; payload?: unknown }): void {
 		try {
 			if (event.type === "action" && event.actionId) {
-				invokeAction(event.actionId, event.payload);
+				// ① 桥自己的回调（toast / confirm / 自定义对话框，由 registerAction 注册）
+				if (invokeAction(event.actionId, event.payload)) return;
+				// ② 落点贡献的回调：actionHandlers 是桥私有的，贡献只能走组件上的 handleAction。
+				// 不补这一跳，落点树里所有按钮/勾选/页签都是“画得出、点不动”的死控件。
+				if (event.nodeId) {
+					const hit = findContributionNode(runtime, event.nodeId);
+					callContributionAction(hit?.contribution.component, event.actionId, event.payload);
+				}
 				return;
 			}
 			const nodeId = event.nodeId;
 			if (!nodeId) return;
+			// ① pi-tui 组件：按 nodeId 找到活组件再调公开方法
 			const component = componentOf(nodeId);
-			if (!component) return;
-			replayEvent(component, event);
+			if (component) {
+				replayEvent(component, event);
+				return;
+			}
+			// ② 落点贡献里的控件：节点**声明了 actionId 才回灌**，
+			// 本地态控件（local）不声明就不打扰扩展，避免每次敲键都绕一圈
+			const hit = findContributionNode(runtime, nodeId);
+			const actionId = (hit?.node as { actionId?: string } | undefined)?.actionId;
+			if (hit && actionId) callContributionAction(hit.contribution.component, actionId, eventPayload(event));
 		} catch (error) {
 			log(`事件回灌抛错（已吞）: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 
-	transport.onEvent(handleEvent);
-	// PiDeck 在轮询响应体里回 `resync: true` → 全量重推一次（§9.4）。
-	// 落点是一次性推送：渲染层丢过状态（换 agent 绑定/会话切换/设置弹窗重开/应用重启）
-	// 就不会自己回来，必须由 PiDeck 主动要一次快照。
-	// 可选链：自定义/旧版 transport 没实现 onResync 时静默跳过，不炸会话（§14.5）。
-	transport.onResync?.(resync);
-
+	// runtime 先建好再注册回调：handleEvent 内部要用它做 guiState 查询，
+	// 不能在建好之前被调到（transport 是异步的，但顺序上不留隐患）。
 	const runtime: BridgeRuntime = {
 		state,
 		transport,
@@ -516,6 +527,14 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 		resync,
 		isWrapped: () => wrapped,
 	};
+
+	transport.onEvent(handleEvent);
+	// PiDeck 在轮询响应体里回 `resync: true` → 全量重推一次（§9.4）。
+	// 落点是一次性推送：渲染层丢过状态（换 agent 绑定/会话切换/设置弹窗重开/应用重启）
+	// 就不会自己回来，必须由 PiDeck 主动要一次快照。
+	// 可选链：自定义/旧版 transport 没实现 onResync 时静默跳过，不炸会话（§14.5）。
+	transport.onResync?.(resync);
+
 	return runtime;
 }
 
@@ -576,6 +595,45 @@ const KEY_BYTES: Record<string, string> = {
 /** 把语义键名转成 handleInput 需要的原始字节。 */
 export function keyToBytes(key: string): string | undefined {
 	return KEY_BYTES[key.trim().toLowerCase()];
+}
+
+/**
+ * 把事件携带的值取出来当 action 的 payload。
+ *
+ * 落点贡献只有 `handleAction(actionId, payload)` 一个交互入口（§14.14 回调不序列化），
+ * 所以 input/select/key/filter 各自的值统一压成 payload。
+ */
+function eventPayload(event: { type: string; index?: number; value?: string; key?: string; filter?: string }): unknown {
+	switch (event.type) {
+		case "input":
+			return event.value;
+		case "select":
+		case "navigate":
+			return event.index;
+		case "key":
+			return event.key;
+		case "filter":
+			return event.filter;
+		default:
+			return undefined;
+	}
+}
+
+/**
+ * 调落点贡献的 `handleAction`。
+ *
+ * **回调抛错不能影响桥**（§14.5）：一个扩展的 bug 不能让其他落点、也不能让 pi 会话出问题。
+ */
+function callContributionAction(component: GuiComponent | undefined, actionId: string, payload?: unknown): boolean {
+	const handler = component?.handleAction;
+	if (typeof handler !== "function") return false;
+	try {
+		handler.call(component, actionId, payload);
+		return true;
+	} catch (error) {
+		log(`落点贡献的 handleAction 抛错（已吞）: ${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	}
 }
 
 /**

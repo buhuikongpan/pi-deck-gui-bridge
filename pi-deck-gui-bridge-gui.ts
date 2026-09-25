@@ -113,7 +113,42 @@ function pushContribution(contribution: GuiContribution, runtime: BridgeRuntime,
 	contribution.lastHash = hash;
 	// 附上 order / title，PiDeck 侧据此排序与渲染分组标题（§7.1-B）
 	const payload = node ? withSlotMeta(node, contribution.options) : null;
+	// 记住这一帧：PiDeck 回灌事件时靠它按 nodeId 反查归属（§8.3）
+	contribution.lastNode = payload ?? undefined;
 	runtime.transport.push({ type: "ui-update", targetId, node: payload });
+}
+
+/**
+ * 在节点树里按 id 找节点（事件回落用）。
+ *
+ * 只看 `children`：交互控件都是叶节点，`tabs`/`modal` 的内嵌内容不参与事件回落
+ * （它们的 actionId 由外层节点自己声明）。
+ */
+function findNodeById(node: GuiNode | undefined, nodeId: string): GuiNode | undefined {
+	if (!node || typeof node !== "object") return undefined;
+	if (node.id === nodeId) return node;
+	const children = (node as { children?: GuiNode[] }).children;
+	if (!Array.isArray(children)) return undefined;
+	for (const child of children) {
+		const hit = findNodeById(child, nodeId);
+		if (hit) return hit;
+	}
+	return undefined;
+}
+
+/**
+ * 按 `nodeId` 反查它属于哪个落点贡献（§8.3 事件回落的依据）。
+ *
+ * 为什么以贡献为单位查、命中即返回：扩展自己决定节点 id，不同贡献之间可能撞 id，
+ * “谁的树里有这个节点”是唯一有语义的归属。失效贡献（校验失败）不参与。
+ */
+export function findContributionNode(runtime: BridgeRuntime, nodeId: string): { contribution: GuiContribution; node: GuiNode } | undefined {
+	for (const contribution of guiState(runtime).contributions.values()) {
+		if (!contribution.valid) continue;
+		const node = findNodeById(contribution.lastNode, nodeId);
+		if (node) return { contribution, node };
+	}
+	return undefined;
 }
 
 /** 把 order / title 作为节点元信息带上（不改节点 kind，PiDeck 侧读 `slot` 字段）。 */

@@ -36,6 +36,23 @@ type NodeBase = {
 };
 
 /**
+ * 「本地态」标记（`local: true`）——**渲染器持有该控件的 UI 态**。
+ *
+ * 为什么需要：落点贡献是「推一帧是一帧」的 JSON 树，一次交互要走
+ * 渲染器 → 主进程 → 轮询 → pi 进程 → 重推 一整个来回（活跃 ~100ms、空闲 ~500ms）。
+ * 输入框若等回灌才显示字符，快速输入会丢字；折叠/勾选若等回灌，手感发黏。
+ *
+ * 语义（四条，宿主与扩展共同遵守）：
+ * 1. 渲染器**立即**更新该控件的本地态（0ms 反馈）；
+ * 2. 若节点声明了 `actionId`，事件**照常上报**（扩展据此做后续动作，如按关键词重新过滤）；
+ * 3. 扩展重推时**不覆盖**用户已改过的本地态 —— 除非扩展推来的值相对上次确实变了；
+ * 4. 本地态活在渲染器组件里，**贡献卸载即消失**（扩展卸载后不留痕迹，§7.7）。
+ *
+ * 不带 `local` 的控件保持原语义：远端受控，等回灌。
+ */
+export type LocalFlag = { local?: boolean };
+
+/**
  * 可序列化 UI 节点。
  *
  * `kind` 归属两类：
@@ -51,12 +68,12 @@ export type UINode =
 	| ({ kind: "vstack"; children: UINode[]; gap?: number } & NodeBase)
 	| ({ kind: "hstack"; children: UINode[]; gap?: number } & NodeBase)
 	| ({ kind: "spacer"; size?: number } & NodeBase)
-	| ({ kind: "input"; value: string; placeholder?: string } & NodeBase)
-	| ({ kind: "editor"; value: string; title?: string } & NodeBase)
+	| ({ kind: "input"; value: string; placeholder?: string; actionId?: string } & LocalFlag & NodeBase)
+	| ({ kind: "editor"; value: string; title?: string; actionId?: string } & LocalFlag & NodeBase)
 	| ({ kind: "select"; items: SelectItemShape[]; selected: number; filter?: string } & NodeBase)
 	| ({ kind: "settings"; items: SettingItemShape[] } & NodeBase)
 	| ({ kind: "loader"; label?: string; frames?: string[]; cancellable?: boolean } & NodeBase)
-	| ({ kind: "scroll"; children: UINode[] } & NodeBase)
+	| ({ kind: "scroll"; children: UINode[]; maxHeight?: number } & NodeBase)
 	| ({ kind: "image"; src: string; alt?: string } & NodeBase)
 	/** ★ 降级保命：认不出的组件渲染成剥了 ANSI 的等宽文本块，绝不抛错。 */
 	| ({ kind: "ansi"; lines: string[] } & NodeBase)
@@ -65,24 +82,31 @@ export type UINode =
 	| ({ kind: "grid"; columns?: number; children: UINode[] } & NodeBase)
 	| ({ kind: "split"; direction: "column" | "row"; ratio?: number; children: UINode[] } & NodeBase)
 	| ({ kind: "card"; title?: string; children: UINode[] } & NodeBase)
-	| ({ kind: "scrollarea"; children: UINode[] } & NodeBase)
+	/**
+	 * 可折叠分组（折叠态由**渲染器**持有，见 `LocalFlag`）。
+	 *
+	 * `label` 是分组标题，`count` 是标题右侧的计数（可选），
+	 * 声明 `actionId` 时展开/收起也会上报一次（扩展可据此懒加载子项）。
+	 */
+	| ({ kind: "collapse"; label: string; collapsed?: boolean; count?: number; actionId?: string; children: UINode[] } & NodeBase)
+	| ({ kind: "scrollarea"; children: UINode[]; maxHeight?: number } & NodeBase)
 	| ({ kind: "badge"; label: string; tone?: Tone } & NodeBase)
 	| ({ kind: "divider"; label?: string } & NodeBase)
 	| ({ kind: "icon"; name: string; tone?: Tone } & NodeBase)
 	| ({ kind: "button"; label: string; tone?: Tone; variant?: Variant; actionId?: string; disabled?: boolean } & NodeBase)
-	| ({ kind: "textarea"; value: string; placeholder?: string; rows?: number } & NodeBase)
-	| ({ kind: "selectinput"; value: string; options: { label: string; value: string }[]; placeholder?: string } & NodeBase)
-	| ({ kind: "checkbox"; label: string; checked: boolean; actionId?: string } & NodeBase)
-	| ({ kind: "switch"; label: string; checked: boolean; actionId?: string } & NodeBase)
-	| ({ kind: "slider"; label?: string; value: number; min?: number; max?: number; step?: number; actionId?: string } & NodeBase)
-	| ({ kind: "list"; items: { label: string; value: string; description?: string }[]; selected: number } & NodeBase)
+	| ({ kind: "textarea"; value: string; placeholder?: string; rows?: number; actionId?: string } & LocalFlag & NodeBase)
+	| ({ kind: "selectinput"; value: string; options: { label: string; value: string }[]; placeholder?: string; actionId?: string } & LocalFlag & NodeBase)
+	| ({ kind: "checkbox"; label: string; checked: boolean; actionId?: string } & LocalFlag & NodeBase)
+	| ({ kind: "switch"; label: string; checked: boolean; actionId?: string } & LocalFlag & NodeBase)
+	| ({ kind: "slider"; label?: string; value: number; min?: number; max?: number; step?: number; actionId?: string } & LocalFlag & NodeBase)
+	| ({ kind: "list"; items: { label: string; value: string; description?: string }[]; selected: number } & LocalFlag & NodeBase)
 	| ({ kind: "table"; columns: string[]; rows: string[][] } & NodeBase)
 	| ({ kind: "tree"; nodes: TreeNodeShape[] } & NodeBase)
 	| ({ kind: "keyvalue"; entries: { key: string; value: string }[] } & NodeBase)
 	| ({ kind: "codeblock"; code: string; language?: string } & NodeBase)
 	| ({ kind: "progress"; value?: number; max?: number; label?: string } & NodeBase)
 	| ({ kind: "spinner"; label?: string } & NodeBase)
-	| ({ kind: "tabs"; tabs: { label: string; content: UINode }[]; active: number; actionId?: string } & NodeBase)
+	| ({ kind: "tabs"; tabs: { label: string; content: UINode }[]; active: number; actionId?: string } & LocalFlag & NodeBase)
 	| ({ kind: "modal"; title?: string; children: UINode[]; actions?: UINode[] } & NodeBase)
 	| ({ kind: "toast"; message: string; tone?: Tone; actions?: { label: string; actionId: string }[] } & NodeBase)
 	| ({ kind: "banner"; message: string; tone?: Tone } & NodeBase);
