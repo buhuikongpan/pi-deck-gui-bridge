@@ -182,13 +182,37 @@ declare function setXxx(key: string, factory: GuiFactory | undefined, opts?: Gui
 
 ### 3.2 排序与 key 语义
 
-- 落点 id 形态 `gui:<slot>:<key>`，宿主按前缀聚合
-- **排序在渲染层做**：`order` 升序（缺省 `1000`），同 `order` 按 key 字母序。
+- 落点 id 形态 `gui:<slot>:<owner>@<key>`，宿主按前缀聚合（见下「命名空间隔离」）
+- **排序在渲染层做**：`order` 升序（缺省 `1000`），同 `order` 按 key 字母序；
+  同 `order` 同 `key` 再按 `owner` 兑底，保证顺序稳定。
   桥是「推一帧是一帧」，无法保证到达顺序 —— **宿主排序才是唯一正确的收敛点**
 - `factory` 传 `undefined` → 移除该 key，位置**回到原样（不占位）**
 - 同 `key` 重复设置 → **后设覆盖**
 - 不同 `key` → **共存**
 - 无贡献时组件返回 `null` → **不产生空 div、不加 margin/gap**
+
+#### 命名空间隔离：两个扩展用同一个 key 不再互相顶掉
+
+`<owner>` 是**贡献者标识**（`encodeOwnerId(扩展根目录)`：可读 slug + 32 位短哈希，
+保证只含 `[A-Za-z0-9._-]`，**不含 `@`**）。它解决一个真实事故：
+
+> 内置面板与第三方全局扩展都用 key `ext-points` 注册 `settings.section`。
+> 旧版的贡献表键是 `<method>:<key>`，宿主 `bridgeTargets` 是 `Record<targetId, node>` ——
+> 两个扩展只有一个槽位，**后注册的把先注册的挤掉**。先注册那棵树的节点还在 PiDeck 里，
+> 但事件再也投不到它：**面板看得见、点不动**。
+
+现在贡献表键是 `<owner>::<method>:<key>`，落点 id 也带 owner —— 两套面板**同时渲染、互不干扰**。
+
+两个实现细节：
+
+1. **owner 取「注册那一刻的调用方」**，靠 `new Error().stack` 上溯到最近的
+   `.../extensions/<name>` 目录，而**不是**桥安装时的 `detectOwner()`
+   （后者给进程内所有扩展返回同一个值，等于没分）。同一扩展的注册/注销写在两个文件里时，
+   上溯目录保证它们归到同一个 id。
+2. **拿不到栈就退化为 `unknown`** —— 行为等同旧版单命名空间，不会比旧版更糟。
+
+> 兼容性：`@` 与 owner 段是**同步发版**引入的（桥 + PiDeck 一起发），不做版本协商。
+> 旧 PiDeck 的 `data-bridge-slot` 选择器应改用不带 owner 的 `data-bridge-slot-key`（`<slot>:<key>`）。
 
 ### 3.3 ⚠️ 已知覆盖缺口
 
@@ -301,6 +325,27 @@ GUI 上的一次点击 → PiDeck 回传事件 → 桥在 pi 进程内调**公�
 
 **限制**：回灌只承诺 `select` / `navigate` / `input` / `key` / `filter` / `action` 六类。
 部分组件的交互无法用公开方法驱动（如 `Editor` 的光标）→ 该组件降级为只读展示。
+
+#### 事件带落点 id（归属硬化）
+
+事件除了 `nodeId`，还带一个 `targetId` —— 事件**来自哪个落点**：
+
+```ts
+type BridgeEvent = { targetId?: string } & (
+  | { type: "select"; nodeId: string; index: number }
+  | { type: "input";  nodeId: string; value: string }
+  | { type: "action"; actionId: string; payload?: unknown }
+  // …
+);
+```
+
+为什么必须带：桥拿到事件后要反查「这个 `nodeId` 属于哪个贡献」。旧实现在**全部贡献里全表扫描**
+谁包含这个节点 —— 两个扩展用同一个 key 时，它们的 `nodeId` 可能相撞（`"same"` / `"1"` 这种很常见），
+**扫到谁就投给谁**，错投无人察觉。现在优先按 `targetId` → `contributionKeyFromTargetId()` 直查，
+一次命中；查不到再退回扫描。
+
+> 不带 `targetId` 仍然兼容（旧宿主）—— 退回全表扫描，行为同旧版。
+> 集成的渲染层本来就知道自己在哪个落点下，顺手带回去就行。
 
 ### 6.1 重同步：PiDeck 主动要快照
 

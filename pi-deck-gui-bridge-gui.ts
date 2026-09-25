@@ -24,8 +24,13 @@ import type { BridgeRuntime } from "./pi-deck-gui-bridge-runtime";
 import { registerAction } from "./pi-deck-gui-bridge-serialize";
 import { createBridgeTheme } from "./pi-deck-gui-bridge-theme";
 import {
+	contributionKey,
+	contributionKeyFromTargetId,
 	countNodes,
 	DEFAULT_ORDER,
+	encodeOwnerId,
+	extensionRootOf,
+	findContributionKey,
 	guiState,
 	GUI_SLOT_METHODS,
 	type GuiContribution,
@@ -33,6 +38,7 @@ import {
 	isGuiComponent,
 	isValidGuiNode,
 	MAX_NODES,
+	OWNER_UNKNOWN,
 	resetGuiStateForTests,
 	slotTargetId,
 } from "./pi-deck-gui-bridge-gui-spec";
@@ -106,7 +112,7 @@ function resolveContribution(contribution: GuiContribution, runtime: BridgeRunti
 
 /** 把某个贡献推给 PiDeck（内容变了才发）。 */
 function pushContribution(contribution: GuiContribution, runtime: BridgeRuntime, force = false): void {
-	const targetId = slotTargetId(contribution.method, contribution.key);
+	const targetId = slotTargetId(contribution.method, contribution.key, contribution.owner);
 	const node = resolveContribution(contribution, runtime);
 	const hash = node ? JSON.stringify(node) : "null";
 	if (!force && hash === contribution.lastHash) return;
@@ -139,11 +145,22 @@ function findNodeById(node: GuiNode | undefined, nodeId: string): GuiNode | unde
 /**
  * 按 `nodeId` 反查它属于哪个落点贡献（§8.3 事件回落的依据）。
  *
- * 为什么以贡献为单位查、命中即返回：扩展自己决定节点 id，不同贡献之间可能撞 id，
- * “谁的树里有这个节点”是唯一有语义的归属。失效贡献（校验失败）不参与。
+ * 优先走 `targetId`：PiDeck 渲染时本来就知道自己在哪个落点下，带回来就能精确定位；
+ * 没有 `targetId`（旧 PiDeck）或解不出时才退回「全表扫描 nodeId」。
+ * 为什么需要精确路径：扩展自己决定节点 id，不同贡献之间**可能撞 id**
+ * （旧版“谁的树里有这个节点”在撞 id 时会投错人）。失效贡献（校验失败）不参与。
  */
-export function findContributionNode(runtime: BridgeRuntime, nodeId: string): { contribution: GuiContribution; node: GuiNode } | undefined {
-	for (const contribution of guiState(runtime).contributions.values()) {
+export function findContributionNode(runtime: BridgeRuntime, nodeId: string, targetId?: string): { contribution: GuiContribution; node?: GuiNode } | undefined {
+	const state = guiState(runtime);
+	if (targetId) {
+		const key = contributionKeyFromTargetId(targetId);
+		const byTarget = key ? state.contributions.get(key) : undefined;
+		if (byTarget && byTarget.valid) {
+			// 命中落点即算命中：actionId 回调只需要组件，node 不在树里时（贡献刚被替换）也不报错
+			return { contribution: byTarget, node: findNodeById(byTarget.lastNode, nodeId) };
+		}
+	}
+	for (const contribution of state.contributions.values()) {
 		if (!contribution.valid) continue;
 		const node = findNodeById(contribution.lastNode, nodeId);
 		if (node) return { contribution, node };
@@ -250,19 +267,23 @@ function makeSlotSetter(method: GuiSlotMethod, runtime: BridgeRuntime) {
 			return;
 		}
 		const state = guiState(runtime);
-		const mapKey = `${method}:${key}`;
-		const existing = state.contributions.get(mapKey);
+		// 归属在**注册那一刻**探（而不是装配期算一次）：只有看调用栈才能知道是谁在注册，
+		// 而装配期的栈里只有桥与 pi runner，所有扩展会拿到同一个值 —— 等于没有归属。
+		const owner = callerOwner();
+		const existingKey = findContributionKey(state, owner, method, key);
+		const existing = existingKey ? state.contributions.get(existingKey) : undefined;
 
 		if (factory === undefined || factory === null) {
-			if (existing) {
+			if (existing && existingKey) {
 				try {
 					existing.component?.dispose?.();
 				} catch {
 					/* 扩展的 dispose 抛错不影响桥 */
 				}
-				state.contributions.delete(mapKey);
+				state.contributions.delete(existingKey);
 			}
-			runtime.transport.push({ type: "ui-update", targetId: slotTargetId(method, key), node: null });
+			// 清的是**已注册那条**的落点：owner 以实际注册值为准，否则 PiDeck 侧会留下孤儿槽
+			runtime.transport.push({ type: "ui-update", targetId: slotTargetId(method, key, existing?.owner ?? owner), node: null });
 			return;
 		}
 
@@ -283,9 +304,9 @@ function makeSlotSetter(method: GuiSlotMethod, runtime: BridgeRuntime) {
 			factory: factory as GuiFactory,
 			options: { ...(options as GuiSlotOptions | undefined), order },
 			valid: true,
-			owner: currentOwner(),
+			owner,
 		};
-		state.contributions.set(mapKey, contribution);
+		state.contributions.set(contributionKey(owner, method, key), contribution);
 		pushContribution(contribution, runtime, true);
 	};
 }
@@ -293,20 +314,75 @@ function makeSlotSetter(method: GuiSlotMethod, runtime: BridgeRuntime) {
 // ── 当前上下文（供模块级函数降级路径用）──────────────────────────
 
 let currentRuntimeRef: BridgeRuntime | null = null;
-let currentOwnerRef = "unknown";
 
 function currentRuntime(): BridgeRuntime | null {
 	return currentRuntimeRef;
 }
 
-function currentOwner(): string {
-	return currentOwnerRef;
+/** 由主扩展在挂载时注入当前 runtime。 */
+export function setCurrentGuiRuntime(runtime: BridgeRuntime | null): void {
+	currentRuntimeRef = runtime;
 }
 
-/** 由主扩展在挂载时注入当前 runtime 与归属扩展名。 */
-export function setCurrentGuiRuntime(runtime: BridgeRuntime | null, owner: string): void {
-	currentRuntimeRef = runtime;
-	currentOwnerRef = owner;
+// ── 归属探测（落点命名空间隔离，§7.7）────────────────────────────
+
+/** 仅测试用：固定归属探测（否则 targetId 里会带测试运行目录，断言没法写死）。 */
+let ownerDetectorOverride: (() => string) | null = null;
+
+/** 仅测试用：覆盖 / 还原归属探测。 */
+export function setOwnerDetectorForTests(detector: (() => string) | null): void {
+	ownerDetectorOverride = detector;
+}
+
+/** 本次落点调用属于哪个扩展。 */
+function callerOwner(): string {
+	if (!ownerDetectorOverride) return detectCallerOwner();
+	try {
+		return ownerDetectorOverride() || OWNER_UNKNOWN;
+	} catch {
+		return OWNER_UNKNOWN;
+	}
+}
+
+/**
+ * 推断「此刻正在注册落点的那个扩展」的归属 id。
+ *
+ * 取栈里**第一个不属于桥 / 框架**的帧，再上溯到扩展根目录（`.../extensions/<name>`）：
+ * - 取第一个（最新）而不是最后一个：最后一个永远是最外层的 pi runner（旧实现就是这么拿到 `runner` 的）
+ * - 上溯到目录：同一扩展的注册/注销写在两个文件里时也归到同一个 id
+ *
+ * 拿不到栈（`Error.stackTraceLimit = 0` 等）时退化为 `unknown`，行为等同旧版单命名空间。
+ */
+export function detectCallerOwner(): string {
+	try {
+		const stack = new Error().stack ?? "";
+		for (const line of stack.split("\n").slice(1)) {
+			const file = filePathOfFrame(line);
+			if (!file || file.includes("pi-deck-gui-bridge")) continue;
+			return encodeOwnerId(extensionRootOf(file));
+		}
+	} catch {
+		/* 拿不到栈 —— 退化为 unknown */
+	}
+	return OWNER_UNKNOWN;
+}
+
+/**
+ * 从一行 stack frame 里取出文件路径。
+ *
+ * 形如 `at fn (/abs/file.ts:12:3)` 或 `at /abs/file.ts:12:3`；
+ * ESM / sourcemap 下可能是 `file:///abs/file.ts:12:3`。
+ * 返回 `undefined` 表示这行不是「源文件帧」（`node:internal/...`、无路径、pi 框架自身）。
+ */
+function filePathOfFrame(frame: string): string | undefined {
+	const match = frame.match(/([^()\s]+?):(\d+):(\d+)\)?\s*$/);
+	if (!match) return undefined;
+	let file = match[1];
+	if (file.startsWith("file://")) file = file.slice(7);
+	if (file.startsWith("node:")) return undefined;
+	// pi 运行时自身：整体跳过，否则会把归法算到框架头上
+	if (file.includes("@earendil-works/pi-coding-agent")) return undefined;
+	return /[\\/]/.test(file) ? file : undefined;
 }
 
 // ── `ctx.gui` 对象 ──────────────────────────────────────────────
@@ -522,7 +598,7 @@ export function installGuiNamespace(ctx: ExtensionContext, runtime: BridgeRuntim
 		const state = guiState(runtime);
 		state.ctx = ctx;
 		// 模块级降级路径也要能拿到 runtime
-		setCurrentGuiRuntime(runtime, detectOwner());
+		setCurrentGuiRuntime(runtime);
 
 		if (Object.prototype.hasOwnProperty.call(ctx, "gui")) {
 			return; // 已挂过（幂等）
@@ -566,7 +642,7 @@ export function installGuiOnUiSingleton(ui: unknown, runtime: BridgeRuntime): bo
 		if (Object.prototype.hasOwnProperty.call(target, "gui")) return false; // 幂等 / 不抢原生字段
 		const namespace = getGuiNamespace(runtime);
 		// 模块级降级路径（guiSet 等）也一并提前可用
-		setCurrentGuiRuntime(runtime, detectOwner());
+		setCurrentGuiRuntime(runtime);
 		Object.defineProperty(target, "gui", {
 			get: () => namespace,
 			enumerable: false,
@@ -578,21 +654,6 @@ export function installGuiOnUiSingleton(ui: unknown, runtime: BridgeRuntime): bo
 		log(`installGuiOnUiSingleton 抛错（已吞）: ${error instanceof Error ? error.message : String(error)}`);
 		return false;
 	}
-}
-
-/** 猜测当前扩展名（用于卸载即清）。 */
-function detectOwner(): string {
-	try {
-		const stack = new Error().stack ?? "";
-		const match = stack.match(/[\\/]([^\\/]+)\.(ts|js|mjs|cjs):/g);
-		if (match && match.length > 1) {
-			const candidate = match[match.length - 1].replace(/^[\\/]/, "").replace(/\.(ts|js|mjs|cjs):$/, "");
-			if (candidate && !candidate.includes("pi-deck-gui-bridge")) return candidate;
-		}
-	} catch {
-		// 忽略
-	}
-	return "unknown";
 }
 
 // ── 模块级降级入口（ctx 被 freeze 时供扩展 import，§7.5）─────────
@@ -681,7 +742,7 @@ export function clearGuiContributions(runtime: BridgeRuntime, owner: string): vo
 			/* no-op */
 		}
 		state.contributions.delete(mapKey);
-		runtime.transport.push({ type: "ui-update", targetId: slotTargetId(contribution.method, contribution.key), node: null });
+		runtime.transport.push({ type: "ui-update", targetId: slotTargetId(contribution.method, contribution.key, contribution.owner), node: null });
 	}
 }
 

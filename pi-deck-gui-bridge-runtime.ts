@@ -483,15 +483,16 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 	}
 
 	/** 处理 PiDeck 回灌的交互事件（§8.3）。 */
-	function handleEvent(event: { type: string; nodeId?: string; actionId?: string; index?: number; value?: string; key?: string; filter?: string; payload?: unknown }): void {
+	function handleEvent(event: { type: string; nodeId?: string; targetId?: string; actionId?: string; index?: number; value?: string; key?: string; filter?: string; payload?: unknown }): void {
 		try {
 			if (event.type === "action" && event.actionId) {
 				// ① 桥自己的回调（toast / confirm / 自定义对话框，由 registerAction 注册）
 				if (invokeAction(event.actionId, event.payload)) return;
 				// ② 落点贡献的回调：actionHandlers 是桥私有的，贡献只能走组件上的 handleAction。
 				// 不补这一跳，落点树里所有按钮/勾选/页签都是“画得出、点不动”的死控件。
+				// 带上 targetId：两个扩展用同一个 key 时，光靠 nodeId（自己的 id 可能跟对方撞）会投错人（§8.3）。
 				if (event.nodeId) {
-					const hit = findContributionNode(runtime, event.nodeId);
+					const hit = findContributionNode(runtime, event.nodeId, event.targetId);
 					callContributionAction(hit?.contribution.component, event.actionId, event.payload);
 				}
 				return;
@@ -506,7 +507,7 @@ export function createBridgeRuntime(transport: UIBridgeTransport): BridgeRuntime
 			}
 			// ② 落点贡献里的控件：节点**声明了 actionId 才回灌**，
 			// 本地态控件（local）不声明就不打扰扩展，避免每次敲键都绕一圈
-			const hit = findContributionNode(runtime, nodeId);
+			const hit = findContributionNode(runtime, nodeId, event.targetId);
 			const actionId = (hit?.node as { actionId?: string } | undefined)?.actionId;
 			if (hit && actionId) callContributionAction(hit.contribution.component, actionId, eventPayload(event));
 		} catch (error) {
